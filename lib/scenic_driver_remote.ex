@@ -206,8 +206,26 @@ defmodule ScenicDriverRemote do
     Scenic.Driver.assign(driver, :recv_buffer, remaining)
   end
 
-  defp handle_event({:ready}, _driver) do
-    Logger.info("#{__MODULE__}: Renderer ready")
+  defp handle_event({:ready}, driver) do
+    Logger.info("#{__MODULE__}: Renderer ready, resyncing scene...")
+
+    # Resync all current scripts to the newly connected renderer
+    script_ids = ViewPort.all_script_ids(driver.viewport)
+    Logger.debug("#{__MODULE__}: Resyncing #{length(script_ids)} scripts")
+
+    Enum.each(script_ids, fn id ->
+      case ViewPort.get_script(driver.viewport, id) do
+        {:ok, script} ->
+          script_bin = script |> Script.serialize() |> IO.iodata_to_binary()
+          send_command(driver, Commands.put_script(id, script_bin))
+
+        {:error, :not_found} ->
+          :ok
+      end
+    end)
+
+    # Trigger render after resync
+    send_command(driver, Commands.render())
     :ok
   end
 

@@ -29,28 +29,30 @@ defmodule ScenicDriverRemote.Protocol do
   @header_size 5
 
   # Commands (driver -> renderer)
-  @cmd_put_script 0x01
-  @cmd_del_script 0x02
-  @cmd_reset 0x03
-  @cmd_clear_color 0x04
+  # MUST match ios/ProbnikApp/scenic_protocol.h and android ScenicProtocol.java
+  @cmd_clear_color 0x01
+  @cmd_put_script 0x02
+  @cmd_del_script 0x03
+  @cmd_reset 0x04
   @cmd_put_font 0x05
   @cmd_put_image 0x06
-  @cmd_render 0x07
-  @cmd_global_tx 0x08
-  @cmd_cursor_tx 0x09
-  @cmd_request_input 0x0A
+  @cmd_global_tx 0x07
+  @cmd_cursor_tx 0x08
+  @cmd_request_input 0x09
+  @cmd_render 0x0F
   @cmd_quit 0x20
 
   # Events (renderer -> driver)
-  @evt_touch 0x01
-  @evt_key 0x02
-  @evt_reshape 0x03
-  @evt_codepoint 0x04
-  @evt_cursor_pos 0x05
-  @evt_mouse_button 0x06
-  @evt_scroll 0x07
-  @evt_cursor_enter 0x08
-  @evt_ready 0x10
+  # MUST match ios/ProbnikApp/scenic_protocol.h and android ScenicProtocol.java
+  @evt_ready 0x80
+  @evt_reshape 0x81
+  @evt_touch 0x82
+  @evt_key 0x83
+  @evt_codepoint 0x84
+  @evt_cursor_pos 0x85
+  @evt_mouse_button 0x86
+  @evt_scroll 0x87
+  @evt_cursor_enter 0x88
   @evt_log_info 0xA0
   @evt_log_warn 0xA1
   @evt_log_error 0xA2

@@ -56,44 +56,54 @@ defmodule ScenicDriverRemote.Protocol.Events do
   end
 
   # Event decoders
+  # Constants MUST match ios/ProbnikApp/scenic_protocol.h and android ScenicProtocol.java
 
-  defp decode_event(0x01, <<action::8, x::big-float-32, y::big-float-32>>) do
+  # EVT_READY = 0x80
+  defp decode_event(0x80, <<>>) do
+    {:ready}
+  end
+
+  # EVT_RESHAPE = 0x81
+  defp decode_event(0x81, <<width::big-unsigned-32, height::big-unsigned-32>>) do
+    {:reshape, width, height}
+  end
+
+  # EVT_TOUCH = 0x82
+  defp decode_event(0x82, <<action::8, x::big-float-32, y::big-float-32>>) do
     {:touch, Protocol.touch_action_to_atom(action), x, y}
   end
 
-  defp decode_event(0x02, <<key::big-unsigned-32, scancode::big-unsigned-32,
+  # EVT_KEY = 0x83
+  defp decode_event(0x83, <<key::big-unsigned-32, scancode::big-unsigned-32,
                             action::big-signed-32, mods::big-unsigned-32>>) do
     {:key, key, scancode, action, mods}
   end
 
-  defp decode_event(0x03, <<width::big-unsigned-32, height::big-unsigned-32>>) do
-    {:reshape, width, height}
-  end
-
-  defp decode_event(0x04, <<codepoint::big-unsigned-32, mods::big-unsigned-32>>) do
+  # EVT_CODEPOINT = 0x84
+  defp decode_event(0x84, <<codepoint::big-unsigned-32, mods::big-unsigned-32>>) do
     {:codepoint, codepoint, mods}
   end
 
-  defp decode_event(0x05, <<x::big-float-32, y::big-float-32>>) do
+  # EVT_CURSOR_POS = 0x85
+  defp decode_event(0x85, <<x::big-float-32, y::big-float-32>>) do
     {:cursor_pos, x, y}
   end
 
-  defp decode_event(0x06, <<button::big-unsigned-32, action::big-unsigned-32,
+  # EVT_MOUSE_BUTTON = 0x86
+  defp decode_event(0x86, <<button::big-unsigned-32, action::big-unsigned-32,
                             mods::big-unsigned-32, x::big-float-32, y::big-float-32>>) do
     {:mouse_button, button, action, mods, x, y}
   end
 
-  defp decode_event(0x07, <<x_offset::big-float-32, y_offset::big-float-32,
+  # EVT_SCROLL = 0x87
+  defp decode_event(0x87, <<x_offset::big-float-32, y_offset::big-float-32,
                             x::big-float-32, y::big-float-32>>) do
     {:scroll, x_offset, y_offset, x, y}
   end
 
-  defp decode_event(0x08, <<entered::8>>) do
+  # EVT_CURSOR_ENTER = 0x88
+  defp decode_event(0x88, <<entered::8>>) do
     {:cursor_enter, entered == 1}
-  end
-
-  defp decode_event(0x10, <<>>) do
-    {:ready}
   end
 
   defp decode_event(0xA0, payload) do
