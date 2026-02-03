@@ -94,7 +94,7 @@ defmodule ScenicDriverRemote do
 
   @impl Scenic.Driver
   def update_scene(ids, driver) do
-    Logger.debug("#{__MODULE__}: update_scene #{inspect(ids)}")
+    #Logger.debug("#{__MODULE__}: update_scene #{inspect(ids)}")
 
     driver =
       Enum.reduce(ids, driver, fn id, driver ->
@@ -231,6 +231,29 @@ defmodule ScenicDriverRemote do
 
   defp handle_event({:reshape, width, height}, driver) do
     Scenic.ViewPort.input(driver.viewport, {:viewport, {:reshape, {width, height}}})
+
+    # Compute a global transform to scale viewport content to fit the actual device
+    {vp_w, vp_h} = driver.viewport.size
+    sx = width / vp_w
+    sy = height / vp_h
+    scale = min(sx, sy)
+
+    # Center the content if aspect ratios differ
+    rendered_w = vp_w * scale
+    rendered_h = vp_h * scale
+    tx = (width - rendered_w) / 2.0
+    ty = (height - rendered_h) / 2.0
+
+    Logger.info(
+      "#{__MODULE__}: reshape #{width}x#{height} vp=#{vp_w}x#{vp_h} scale=#{scale} offset=#{tx},#{ty}"
+    )
+
+    send_command(driver, Commands.global_tx(scale, 0.0, 0.0, scale, tx, ty))
+    send_command(driver, Commands.render())
+  end
+
+  defp handle_event({:stats, bytes_received}, _driver) do
+    :persistent_term.put(:net_bytes_received, bytes_received)
   end
 
   defp handle_event({:touch, action, x, y}, driver) do

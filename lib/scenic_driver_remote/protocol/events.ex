@@ -106,6 +106,11 @@ defmodule ScenicDriverRemote.Protocol.Events do
     {:cursor_enter, entered == 1}
   end
 
+  # EVT_STATS = 0x90
+  defp decode_event(0x90, <<bytes_received::big-unsigned-64>>) do
+    {:stats, bytes_received}
+  end
+
   defp decode_event(0xA0, payload) do
     {:log_info, payload}
   end
