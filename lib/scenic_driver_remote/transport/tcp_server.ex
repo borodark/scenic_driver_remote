@@ -1,28 +1,16 @@
 defmodule ScenicDriverRemote.Transport.TcpServer do
   @moduledoc """
-  TCP server transport for remote rendering.
+  TCP server transport for remote rendering with multi-client support.
 
-  Unlike `Tcp` which connects to a remote server, this module listens for
-  incoming connections from mobile renderers (Android/iOS).
-
-  The server starts listening immediately and accepts connections asynchronously.
-  When a client connects, TCP messages are forwarded to the controlling process.
+  Listens for incoming connections from mobile renderers (Android/iOS).
+  Multiple clients can connect simultaneously — commands are broadcast
+  to all connected clients, and events from any client are forwarded
+  to the Scenic driver.
 
   ## Options
 
   - `:port` - Required. Port number to listen on.
   - `:host` - Optional. Interface to bind to (default: all interfaces).
-
-  ## Example
-
-      config :my_app, :viewport,
-        drivers: [
-          [
-            module: ScenicDriverRemote,
-            transport: ScenicDriverRemote.Transport.TcpServer,
-            port: 4040
-          ]
-        ]
   """
 
   @behaviour ScenicDriverRemote.Transport
@@ -32,7 +20,7 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
   import Kernel, except: [send: 2]
 
-  defstruct [:listen_socket, :client_socket, :port, :host, :owner]
+  defstruct [:port, :host, :owner]
 
   # Client API
 
@@ -43,7 +31,6 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
     case GenServer.start_link(__MODULE__, {port, host, self()}) do
       {:ok, pid} ->
-        # Return a handle that wraps the GenServer
         {:ok, %__MODULE__{port: port, host: host, owner: pid}}
 
       {:error, reason} ->
@@ -88,7 +75,6 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
   def controlling_process(_, _), do: {:error, :not_connected}
 
-  # Get server info for QR code generation
   def get_server_info(%__MODULE__{owner: pid}) when is_pid(pid) do
     GenServer.call(pid, :get_server_info)
   catch
@@ -111,14 +97,13 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
         state = %{
           listen_socket: listen_socket,
-          client_socket: nil,
+          clients: %{},
           port: port,
           host: host_tuple,
           owner: owner,
           local_ip: local_ip
         }
 
-        # Start accepting connections asynchronously
         Kernel.send(self(), :accept)
 
         {:ok, state}
@@ -130,29 +115,34 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
   end
 
   @impl GenServer
-  def handle_call({:send, data}, _from, %{client_socket: nil} = state) do
+  def handle_call({:send, _data}, _from, %{clients: clients} = state) when map_size(clients) == 0 do
     {:reply, {:error, :not_connected}, state}
   end
 
-  def handle_call({:send, data}, _from, %{client_socket: socket} = state) do
-    result = :gen_tcp.send(socket, data)
-    {:reply, result, state}
+  def handle_call({:send, data}, _from, %{clients: clients} = state) do
+    failed =
+      Enum.reduce(clients, [], fn {socket, _client_state}, failed ->
+        case :gen_tcp.send(socket, data) do
+          :ok -> failed
+          {:error, _reason} -> [socket | failed]
+        end
+      end)
+
+    # Remove clients that failed to receive
+    state =
+      Enum.reduce(failed, state, fn socket, state ->
+        remove_client(socket, state, "send failed")
+      end)
+
+    {:reply, :ok, state}
   end
 
-  def handle_call(:connected?, _from, %{client_socket: socket} = state) do
-    connected = socket != nil && port_open?(socket)
-    {:reply, connected, state}
+  def handle_call(:connected?, _from, %{clients: clients} = state) do
+    {:reply, map_size(clients) > 0, state}
   end
 
-  def handle_call({:controlling_process, new_owner}, _from, %{client_socket: socket} = state) do
-    result =
-      if socket do
-        :gen_tcp.controlling_process(socket, new_owner)
-      else
-        :ok
-      end
-
-    {:reply, result, %{state | owner: new_owner}}
+  def handle_call({:controlling_process, new_owner}, _from, state) do
+    {:reply, :ok, %{state | owner: new_owner}}
   end
 
   def handle_call(:get_server_info, _from, %{local_ip: ip, port: port} = state) do
@@ -161,13 +151,13 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
   @impl GenServer
   def handle_info(:accept, %{listen_socket: listen_socket} = state) do
-    # Non-blocking accept with timeout
     case :gen_tcp.accept(listen_socket, 100) do
       {:ok, client_socket} ->
-        handle_new_client(client_socket, state)
+        state = handle_new_client(client_socket, state)
+        Kernel.send(self(), :accept)
+        {:noreply, state}
 
       {:error, :timeout} ->
-        # Keep trying to accept
         Kernel.send(self(), :accept)
         {:noreply, state}
 
@@ -182,26 +172,41 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
     end
   end
 
-  def handle_info({:tcp, socket, data}, %{client_socket: socket, owner: owner} = state) do
-    # Forward TCP data to owner (the Scenic driver)
-    Kernel.send(owner, {:tcp, socket, data})
-    {:noreply, state}
+  def handle_info({:tcp, socket, data}, %{clients: clients, owner: owner} = state) do
+    case Map.get(clients, socket) do
+      nil ->
+        {:noreply, state}
+
+      %{buffer: buffer} ->
+        buffer = buffer <> data
+        {frames, remaining} = extract_frames(buffer)
+
+        # Forward each complete frame to the driver
+        Enum.each(frames, fn frame ->
+          Kernel.send(owner, {:tcp, socket, frame})
+        end)
+
+        clients = Map.put(clients, socket, %{buffer: remaining})
+        {:noreply, %{state | clients: clients}}
+    end
   end
 
-  def handle_info({:tcp_closed, socket}, %{client_socket: socket, owner: owner} = state) do
-    Logger.info("#{__MODULE__}: Client disconnected")
-    Kernel.send(owner, {:tcp_closed, socket})
-    # Go back to accepting new connections
-    Kernel.send(self(), :accept)
-    {:noreply, %{state | client_socket: nil}}
+  def handle_info({:tcp_closed, socket}, %{clients: clients} = state) do
+    if Map.has_key?(clients, socket) do
+      state = remove_client(socket, state, "disconnected")
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
   end
 
-  def handle_info({:tcp_error, socket, reason}, %{client_socket: socket, owner: owner} = state) do
-    Logger.warning("#{__MODULE__}: Client error: #{inspect(reason)}")
-    Kernel.send(owner, {:tcp_error, socket, reason})
-    :gen_tcp.close(socket)
-    Kernel.send(self(), :accept)
-    {:noreply, %{state | client_socket: nil}}
+  def handle_info({:tcp_error, socket, reason}, %{clients: clients} = state) do
+    if Map.has_key?(clients, socket) do
+      state = remove_client(socket, state, "error: #{inspect(reason)}")
+      {:noreply, state}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_info(msg, state) do
@@ -210,32 +215,50 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
   end
 
   @impl GenServer
-  def terminate(_reason, %{listen_socket: listen, client_socket: client}) do
-    if client, do: :gen_tcp.close(client)
+  def terminate(_reason, %{listen_socket: listen, clients: clients}) do
+    Enum.each(clients, fn {socket, _} ->
+      :gen_tcp.close(socket)
+    end)
     if listen, do: :gen_tcp.close(listen)
     :ok
   end
 
   # Private helpers
 
-  defp handle_new_client(client_socket, %{client_socket: old_socket, owner: owner} = state) do
-    # Close existing client if any
-    if old_socket, do: :gen_tcp.close(old_socket)
-
+  defp handle_new_client(client_socket, %{clients: clients} = state) do
     {:ok, {addr, port}} = :inet.peername(client_socket)
     addr_str = format_ip(addr)
-    Logger.info("#{__MODULE__}: Client connected from #{addr_str}:#{port}")
+    count = map_size(clients) + 1
+    Logger.info("#{__MODULE__}: Client connected from #{addr_str}:#{port} (#{count} total)")
 
-    # Set socket to active mode so we receive messages
     :inet.setopts(client_socket, active: true)
-
-    # Transfer controlling process to ourselves (we'll forward to owner)
     :gen_tcp.controlling_process(client_socket, self())
 
-    # Notify owner that we're connected (driver will see this as successful connection)
-    # The driver already handles {:tcp, ...} messages
+    clients = Map.put(clients, client_socket, %{buffer: <<>>})
+    %{state | clients: clients}
+  end
 
-    {:noreply, %{state | client_socket: client_socket}}
+  defp remove_client(socket, %{clients: clients} = state, reason) do
+    :gen_tcp.close(socket)
+    clients = Map.delete(clients, socket)
+    count = map_size(clients)
+    Logger.info("#{__MODULE__}: Client #{reason} (#{count} remaining)")
+    %{state | clients: clients}
+  end
+
+  # Extract complete protocol frames from a buffer.
+  # Frame format: type(1 byte) + length(4 bytes BE) + payload(length bytes)
+  defp extract_frames(buffer, frames \\ [])
+
+  defp extract_frames(<<type::8, length::big-unsigned-32, rest::binary>> = _buffer, frames)
+       when byte_size(rest) >= length do
+    <<payload::binary-size(length), remaining::binary>> = rest
+    frame = <<type::8, length::big-unsigned-32, payload::binary>>
+    extract_frames(remaining, [frame | frames])
+  end
+
+  defp extract_frames(buffer, frames) do
+    {Enum.reverse(frames), buffer}
   end
 
   defp normalize_host(host) when is_tuple(host), do: host
@@ -247,13 +270,6 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
     case :inet.parse_address(to_charlist(str)) do
       {:ok, addr} -> addr
       _ -> {0, 0, 0, 0}
-    end
-  end
-
-  defp port_open?(socket) do
-    case :inet.peername(socket) do
-      {:ok, _} -> true
-      _ -> false
     end
   end
 
