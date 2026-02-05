@@ -74,8 +74,11 @@ defmodule ScenicDriverRemote.Protocol.Events do
   end
 
   # EVT_KEY = 0x83
-  defp decode_event(0x83, <<key::big-unsigned-32, scancode::big-unsigned-32,
-                            action::big-signed-32, mods::big-unsigned-32>>) do
+  defp decode_event(
+         0x83,
+         <<key::big-unsigned-32, scancode::big-unsigned-32, action::big-signed-32,
+           mods::big-unsigned-32>>
+       ) do
     {:key, key, scancode, action, mods}
   end
 
@@ -90,14 +93,19 @@ defmodule ScenicDriverRemote.Protocol.Events do
   end
 
   # EVT_MOUSE_BUTTON = 0x86
-  defp decode_event(0x86, <<button::big-unsigned-32, action::big-unsigned-32,
-                            mods::big-unsigned-32, x::big-float-32, y::big-float-32>>) do
+  defp decode_event(
+         0x86,
+         <<button::big-unsigned-32, action::big-unsigned-32, mods::big-unsigned-32,
+           x::big-float-32, y::big-float-32>>
+       ) do
     {:mouse_button, button, action, mods, x, y}
   end
 
   # EVT_SCROLL = 0x87
-  defp decode_event(0x87, <<x_offset::big-float-32, y_offset::big-float-32,
-                            x::big-float-32, y::big-float-32>>) do
+  defp decode_event(
+         0x87,
+         <<x_offset::big-float-32, y_offset::big-float-32, x::big-float-32, y::big-float-32>>
+       ) do
     {:scroll, x_offset, y_offset, x, y}
   end
 

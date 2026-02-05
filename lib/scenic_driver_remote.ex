@@ -109,12 +109,12 @@ defmodule ScenicDriverRemote do
 
   use Scenic.Driver
   require Logger
+  import Bitwise, only: [band: 2]
 
   alias Scenic.ViewPort
   alias Scenic.Assets.Static
   alias Scenic.Assets.Stream
   alias Scenic.Script
-  alias ScenicDriverRemote.Protocol
   alias ScenicDriverRemote.Protocol.Commands
   alias ScenicDriverRemote.Protocol.Events
 
@@ -174,7 +174,7 @@ defmodule ScenicDriverRemote do
 
   @impl Scenic.Driver
   def update_scene(ids, driver) do
-    #Logger.debug("#{__MODULE__}: update_scene #{inspect(ids)}")
+    # Logger.debug("#{__MODULE__}: update_scene #{inspect(ids)}")
 
     driver =
       Enum.reduce(ids, driver, fn id, driver ->
@@ -357,16 +357,9 @@ defmodule ScenicDriverRemote do
     Scenic.ViewPort.input(driver.viewport, input)
   end
 
-  defp handle_event({:key, key, scancode, action, mods}, driver) do
-    action_atom =
-      case action do
-        0 -> :release
-        1 -> :press
-        2 -> :repeat
-        _ -> :press
-      end
-
-    Scenic.ViewPort.input(driver.viewport, {:key, {key, scancode, action_atom, mods}})
+  defp handle_event({:key, key, _scancode, action, mods}, driver) do
+    key_atom = if is_atom(key), do: key, else: :"key_#{key}"
+    Scenic.ViewPort.input(driver.viewport, {:key, {key_atom, action, int_to_mods(mods)}})
   end
 
   defp handle_event({:codepoint, codepoint, mods}, driver) do
@@ -379,17 +372,45 @@ defmodule ScenicDriverRemote do
 
   defp handle_event({:mouse_button, button, action, mods, x, y}, driver) do
     action_val = if action == 1, do: 1, else: 0
-    Scenic.ViewPort.input(driver.viewport, {:cursor_button, {button, action_val, mods, {x, y}}})
+    btn = button_to_atom(button)
+
+    Scenic.ViewPort.input(
+      driver.viewport,
+      {:cursor_button, {btn, action_val, int_to_mods(mods), {x, y}}}
+    )
   end
 
   defp handle_event({:scroll, x_offset, y_offset, x, y}, driver) do
-    Scenic.ViewPort.input(driver.viewport, {:scroll, {{x_offset, y_offset}, {x, y}}})
+    Scenic.ViewPort.input(driver.viewport, {:cursor_scroll, {{x_offset, y_offset}, {x, y}}})
   end
 
   defp handle_event(event, _driver) do
     Logger.debug("#{__MODULE__}: Unhandled event: #{inspect(event)}")
     :ok
   end
+
+  # GLFW modifier bitmask → Scenic modifier atom list
+  @mod_bits [
+    {0x0001, :shift},
+    {0x0002, :ctrl},
+    {0x0004, :alt},
+    {0x0008, :meta},
+    {0x0010, :caps_lock},
+    {0x0020, :num_lock}
+  ]
+
+  defp int_to_mods(mods) when is_integer(mods) do
+    for {bit, atom} <- @mod_bits, band(mods, bit) != 0, do: atom
+  end
+
+  defp int_to_mods(mods) when is_list(mods), do: mods
+  defp int_to_mods(_), do: []
+
+  defp button_to_atom(0), do: :left
+  defp button_to_atom(1), do: :right
+  defp button_to_atom(2), do: :middle
+  defp button_to_atom(n) when is_integer(n), do: :"button_#{n}"
+  defp button_to_atom(a) when is_atom(a), do: a
 
   defp normalize_color({r, g, b}) when is_integer(r), do: {r / 255, g / 255, b / 255, 1.0}
   defp normalize_color({r, g, b, a}) when is_integer(r), do: {r / 255, g / 255, b / 255, a / 255}
@@ -457,23 +478,27 @@ defmodule ScenicDriverRemote do
       Enum.reduce(ids, streams, fn id, streams ->
         with false <- Enum.member?(streams, id),
              :ok <- Stream.subscribe(id) do
-          case Stream.fetch(id) do
-            {:ok, {Stream.Image, {w, h, _format}, bin}} ->
-              send_command(driver, Commands.put_image(id, :encoded, w, h, bin))
-              [id | streams]
-
-            {:ok, {Stream.Bitmap, {w, h, format}, bin}} ->
-              send_command(driver, Commands.put_image(id, format, w, h, bin))
-              [id | streams]
-
-            _ ->
-              streams
-          end
+          load_stream(driver, id, streams)
         else
           _ -> streams
         end
       end)
 
     Scenic.Driver.assign(driver, :media, Map.put(media, :streams, streams))
+  end
+
+  defp load_stream(driver, id, streams) do
+    case Stream.fetch(id) do
+      {:ok, {Stream.Image, {w, h, _format}, bin}} ->
+        send_command(driver, Commands.put_image(id, :encoded, w, h, bin))
+        [id | streams]
+
+      {:ok, {Stream.Bitmap, {w, h, format}, bin}} ->
+        send_command(driver, Commands.put_image(id, format, w, h, bin))
+        [id | streams]
+
+      _ ->
+        streams
+    end
   end
 end

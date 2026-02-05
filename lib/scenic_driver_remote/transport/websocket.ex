@@ -53,10 +53,9 @@ if Code.ensure_loaded?(WebSockex) do
     end
 
     @impl ScenicDriverRemote.Transport
-    def controlling_process(%__MODULE__{} = transport, pid) do
-      # WebSockex doesn't support changing controlling process
-      # We update owner in state instead
-      {:ok, %{transport | owner: pid}}
+    def controlling_process(%__MODULE__{conn: conn}, pid) do
+      WebSockex.cast(conn, {:set_owner, pid})
+      :ok
     end
 
     # WebSockex callbacks
@@ -74,6 +73,10 @@ if Code.ensure_loaded?(WebSockex) do
     @impl WebSockex
     def handle_cast(:close, state) do
       {:close, state}
+    end
+
+    def handle_cast({:set_owner, pid}, state) do
+      {:ok, %{state | owner: pid}}
     end
 
     @impl WebSockex

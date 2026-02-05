@@ -30,7 +30,9 @@ defmodule ScenicDriverRemote.MixProject do
       # Optional transports
       {:websockex, "~> 0.4", optional: true},
       # Dev/test
-      {:ex_doc, "~> 0.29", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.29", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 

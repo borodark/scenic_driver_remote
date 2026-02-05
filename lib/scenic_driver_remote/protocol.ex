@@ -96,6 +96,9 @@ defmodule ScenicDriverRemote.Protocol do
   def evt_scroll, do: @evt_scroll
   def evt_cursor_enter, do: @evt_cursor_enter
   def evt_ready, do: @evt_ready
+  def evt_log_info, do: @evt_log_info
+  def evt_log_warn, do: @evt_log_warn
+  def evt_log_error, do: @evt_log_error
 
   # Image format constants
   def img_fmt_encoded, do: @img_fmt_encoded

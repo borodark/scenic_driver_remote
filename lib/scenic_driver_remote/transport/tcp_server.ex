@@ -75,6 +75,7 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
 
   def controlling_process(_, _), do: {:error, :not_connected}
 
+  @doc "Returns `{:ok, ip_tuple, port}` for the listening server."
   def get_server_info(%__MODULE__{owner: pid}) when is_pid(pid) do
     GenServer.call(pid, :get_server_info)
   catch
@@ -93,7 +94,10 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
       {:ok, listen_socket} ->
         local_ip = get_local_ip()
         Logger.info("#{__MODULE__}: Listening on #{format_ip(local_ip)}:#{port}")
-        Logger.info("#{__MODULE__}: QR payload: {probnikoff_net, {#{format_ip_tuple(local_ip)}, #{port}}}")
+
+        Logger.info(
+          "#{__MODULE__}: QR payload: {probnikoff_net, {#{format_ip_tuple(local_ip)}, #{port}}}"
+        )
 
         state = %{
           listen_socket: listen_socket,
@@ -115,7 +119,8 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
   end
 
   @impl GenServer
-  def handle_call({:send, _data}, _from, %{clients: clients} = state) when map_size(clients) == 0 do
+  def handle_call({:send, _data}, _from, %{clients: clients} = state)
+      when map_size(clients) == 0 do
     {:reply, {:error, :not_connected}, state}
   end
 
@@ -219,6 +224,7 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
     Enum.each(clients, fn {socket, _} ->
       :gen_tcp.close(socket)
     end)
+
     if listen, do: :gen_tcp.close(listen)
     :ok
   end
@@ -280,19 +286,16 @@ defmodule ScenicDriverRemote.Transport.TcpServer do
     case :inet.getifaddrs() do
       {:ok, ifaddrs} ->
         ifaddrs
-        |> Enum.flat_map(fn {_name, opts} ->
-          opts
-          |> Enum.filter(fn
-            {:addr, {a, _, _, _}} when a != 127 -> true
-            _ -> false
-          end)
-          |> Enum.map(fn {:addr, addr} -> addr end)
-        end)
+        |> Enum.flat_map(fn {_name, opts} -> non_loopback_addrs(opts) end)
         |> List.first() || {127, 0, 0, 1}
 
       _ ->
         {127, 0, 0, 1}
     end
+  end
+
+  defp non_loopback_addrs(opts) do
+    for {:addr, {a, _, _, _} = addr} <- opts, a != 127, do: addr
   end
 
   def format_ip({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
