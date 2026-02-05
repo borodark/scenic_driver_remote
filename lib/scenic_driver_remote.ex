@@ -8,15 +8,49 @@ defmodule ScenicDriverRemote do
   ## Configuration
 
       config :my_app, :viewport,
-        size: {800, 600},
+        size: {1080, 2400},
+        default_scene: MyApp.Scene.Main,
         drivers: [
           [
             module: ScenicDriverRemote,
-            transport: ScenicDriverRemote.Transport.Tcp,
-            host: "localhost",
-            port: 4000
+            transport: ScenicDriverRemote.Transport.TcpServer,
+            port: 4040
           ]
         ]
+
+  ## Viewport Size
+
+  The `size: {w, h}` in the viewport config declares the **logical canvas** your
+  scene renders into. Set it to the pixel resolution of your primary target device:
+
+      # Android phone (1080p tall)
+      size: {1080, 2400}
+
+      # iPhone (logical points × 3 = pixels, but use pixels here)
+      size: {1179, 2556}
+
+  The scene's `init/3` receives this as `scene.viewport.size` and uses it to
+  compute layout (widget sizes, padding, font sizes, etc.).
+
+  ### What happens on the device
+
+  When the remote client (Android/iOS app) connects, it reports its actual screen
+  size via a `RESHAPE` event. The driver then:
+
+  1. Forwards the reshape to the scene (so it can optionally re-layout).
+  2. Computes a **GLOBAL_TX** transform that scales and centers the viewport
+     canvas onto the device screen (letterbox fit).
+
+  **If the device matches the viewport config** (e.g. `size: {1080, 2400}` and
+  the Android phone is 1080×2400), GLOBAL_TX is identity — the scene renders 1:1.
+
+  **If the device differs** (e.g. an iPhone at 1179×2556), GLOBAL_TX scales the
+  1080×2400 canvas uniformly to fit inside 1179×2556, with centering offsets to
+  fill any leftover margin.
+
+  In practice: set `size` to your most common target device. Other devices will
+  see the same content scaled to fit, with small letterbox bars if aspect ratios
+  differ.
 
   ## Transport Options
 
@@ -24,7 +58,53 @@ defmodule ScenicDriverRemote do
 
   - `ScenicDriverRemote.Transport.UnixSocket` - requires `:path`
   - `ScenicDriverRemote.Transport.Tcp` - requires `:host` and `:port`
+  - `ScenicDriverRemote.Transport.TcpServer` - requires `:port` (listens for connections)
   - `ScenicDriverRemote.Transport.WebSocket` - requires `:url`
+
+  ## Scaling / Coordinate Spaces
+
+  Three coordinate spaces are involved in rendering:
+
+  1. **Base design space** — the reference resolution a scene was authored for
+     (e.g. `@base_width 1668, @base_height 2388` in the scene module).
+     Padding, gaps, and font sizes are expressed relative to this size.
+
+  2. **Viewport config space** — the `size: {w, h}` from the viewport config.
+     The scene's `init/3` reads `scene.viewport.size` and scales from base → viewport.
+
+  3. **Device pixel space** — the actual screen pixels reported by the remote
+     client via the `RESHAPE` event (e.g. 1080×2400 on Android, 1179×2556 on iPhone).
+
+  ### RESHAPE flow
+
+  When the client sends `RESHAPE(device_w, device_h)`:
+
+  1. The event is forwarded to the scene as `{:viewport, {:reshape, {w, h}}}`.
+     If the scene handles this, it can re-layout its graph for the device dimensions.
+
+  2. The driver computes a **GLOBAL_TX** affine transform that maps from
+     viewport config space → device pixel space (uniform scale + centering):
+
+         scale = min(device_w / vp_w, device_h / vp_h)
+         tx    = (device_w - vp_w * scale) / 2
+         ty    = (device_h - vp_h * scale) / 2
+
+     This is sent to the client as `global_tx(scale, 0, 0, scale, tx, ty)`.
+
+  ### Important: double-scaling caveat
+
+  If the scene **also** re-layouts on reshape (using device dimensions directly),
+  then scene coordinates are already in device pixel space and the GLOBAL_TX
+  scaling is applied on top — causing content to overflow the viewport.
+
+  This is invisible when viewport config matches the device exactly (e.g.
+  Android NET at 1080×2400) because GLOBAL_TX becomes identity. On any device
+  with a different resolution the overflow becomes visible.
+
+  **To avoid double-scaling**, either:
+  - The scene should ignore reshape and always render in viewport config space
+    (let GLOBAL_TX handle adaptation), **or**
+  - The driver should send identity GLOBAL_TX when the scene handles reshape.
   """
 
   use Scenic.Driver
@@ -229,16 +309,26 @@ defmodule ScenicDriverRemote do
     :ok
   end
 
+  # Client reports its actual screen size in device pixels.
+  #
+  # Two things happen:
+  #   1. Forward to scene — scene may re-layout its graph for the new dimensions.
+  #   2. Compute GLOBAL_TX — uniform scale + centering that maps from the
+  #      configured viewport size (e.g. 1080×2400) to the reported device size.
+  #
+  # NOTE: if the scene re-layouts using {width, height} directly, the scene
+  # coordinates are already in device-pixel space and the GLOBAL_TX scaling
+  # is redundant (see @moduledoc "double-scaling caveat").
   defp handle_event({:reshape, width, height}, driver) do
     Scenic.ViewPort.input(driver.viewport, {:viewport, {:reshape, {width, height}}})
 
-    # Compute a global transform to scale viewport content to fit the actual device
+    # Scale from viewport config space → device pixel space (letterbox fit)
     {vp_w, vp_h} = driver.viewport.size
     sx = width / vp_w
     sy = height / vp_h
     scale = min(sx, sy)
 
-    # Center the content if aspect ratios differ
+    # Center content when aspect ratios differ
     rendered_w = vp_w * scale
     rendered_h = vp_h * scale
     tx = (width - rendered_w) / 2.0
