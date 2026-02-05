@@ -66,30 +66,30 @@ defmodule ScenicDriverRemote.ProtocolTest do
   end
 
   describe "Protocol constants" do
-    test "command type codes" do
-      assert Protocol.cmd_clear_color() == 0x01
-      assert Protocol.cmd_put_script() == 0x02
-      assert Protocol.cmd_del_script() == 0x03
-      assert Protocol.cmd_reset() == 0x04
-      assert Protocol.cmd_put_font() == 0x05
-      assert Protocol.cmd_put_image() == 0x06
-      assert Protocol.cmd_global_tx() == 0x07
-      assert Protocol.cmd_cursor_tx() == 0x08
-      assert Protocol.cmd_request_input() == 0x09
-      assert Protocol.cmd_render() == 0x0F
+    test "command type codes match scenic_driver_local" do
+      assert Protocol.cmd_put_script() == 0x01
+      assert Protocol.cmd_del_script() == 0x02
+      assert Protocol.cmd_reset() == 0x03
+      assert Protocol.cmd_global_tx() == 0x04
+      assert Protocol.cmd_cursor_tx() == 0x05
+      assert Protocol.cmd_render() == 0x06
+      assert Protocol.cmd_clear_color() == 0x08
+      assert Protocol.cmd_request_input() == 0x0A
       assert Protocol.cmd_quit() == 0x20
+      assert Protocol.cmd_put_font() == 0x40
+      assert Protocol.cmd_put_image() == 0x41
     end
 
-    test "event type codes" do
-      assert Protocol.evt_ready() == 0x80
-      assert Protocol.evt_reshape() == 0x81
-      assert Protocol.evt_touch() == 0x82
-      assert Protocol.evt_key() == 0x83
-      assert Protocol.evt_codepoint() == 0x84
-      assert Protocol.evt_cursor_pos() == 0x85
-      assert Protocol.evt_mouse_button() == 0x86
-      assert Protocol.evt_scroll() == 0x87
-      assert Protocol.evt_cursor_enter() == 0x88
+    test "event type codes match scenic_driver_local" do
+      assert Protocol.evt_reshape() == 0x05
+      assert Protocol.evt_ready() == 0x06
+      assert Protocol.evt_touch() == 0x08
+      assert Protocol.evt_key() == 0x0A
+      assert Protocol.evt_codepoint() == 0x0B
+      assert Protocol.evt_cursor_pos() == 0x0C
+      assert Protocol.evt_mouse_button() == 0x0D
+      assert Protocol.evt_scroll() == 0x0E
+      assert Protocol.evt_cursor_enter() == 0x0F
       assert Protocol.evt_log_info() == 0xA0
       assert Protocol.evt_log_warn() == 0xA1
       assert Protocol.evt_log_error() == 0xA2
@@ -244,14 +244,14 @@ defmodule ScenicDriverRemote.ProtocolTest do
 
   describe "Events.parse_all/1" do
     test "parses ready event" do
-      binary = <<0x80, 0::big-unsigned-32>>
+      binary = <<0x06, 0::big-unsigned-32>>
       {events, remaining} = Events.parse_all(binary)
       assert events == [{:ready}]
       assert remaining == <<>>
     end
 
     test "parses reshape event" do
-      binary = <<0x81, 8::big-unsigned-32, 1080::big-unsigned-32, 2400::big-unsigned-32>>
+      binary = <<0x05, 8::big-unsigned-32, 1080::big-unsigned-32, 2400::big-unsigned-32>>
       {events, remaining} = Events.parse_all(binary)
       assert events == [{:reshape, 1080, 2400}]
       assert remaining == <<>>
@@ -260,7 +260,7 @@ defmodule ScenicDriverRemote.ProtocolTest do
     test "parses touch down event" do
       x = 100.5
       y = 200.5
-      binary = <<0x82, 9::big-unsigned-32, 0::8, x::big-float-32, y::big-float-32>>
+      binary = <<0x08, 9::big-unsigned-32, 0::8, x::big-float-32, y::big-float-32>>
       {[{:touch, action, rx, ry}], <<>>} = Events.parse_all(binary)
       assert action == :down
       assert_in_delta rx, x, 0.001
@@ -268,18 +268,18 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "parses touch up event" do
-      binary = <<0x82, 9::big-unsigned-32, 1::8, 50.0::big-float-32, 60.0::big-float-32>>
+      binary = <<0x08, 9::big-unsigned-32, 1::8, 50.0::big-float-32, 60.0::big-float-32>>
       {[{:touch, :up, _, _}], <<>>} = Events.parse_all(binary)
     end
 
     test "parses touch move event" do
-      binary = <<0x82, 9::big-unsigned-32, 2::8, 50.0::big-float-32, 60.0::big-float-32>>
+      binary = <<0x08, 9::big-unsigned-32, 2::8, 50.0::big-float-32, 60.0::big-float-32>>
       {[{:touch, :move, _, _}], <<>>} = Events.parse_all(binary)
     end
 
     test "parses key event" do
       binary =
-        <<0x83, 16::big-unsigned-32, 65::big-unsigned-32, 30::big-unsigned-32, 1::big-signed-32,
+        <<0x0A, 16::big-unsigned-32, 65::big-unsigned-32, 30::big-unsigned-32, 1::big-signed-32,
           0::big-unsigned-32>>
 
       {[{:key, key, scancode, action, mods}], <<>>} = Events.parse_all(binary)
@@ -290,14 +290,14 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "parses codepoint event" do
-      binary = <<0x84, 8::big-unsigned-32, 0x41::big-unsigned-32, 0::big-unsigned-32>>
+      binary = <<0x0B, 8::big-unsigned-32, 0x41::big-unsigned-32, 0::big-unsigned-32>>
       {[{:codepoint, cp, mods}], <<>>} = Events.parse_all(binary)
       assert cp == 0x41
       assert mods == 0
     end
 
     test "parses cursor_pos event" do
-      binary = <<0x85, 8::big-unsigned-32, 320.0::big-float-32, 480.0::big-float-32>>
+      binary = <<0x0C, 8::big-unsigned-32, 320.0::big-float-32, 480.0::big-float-32>>
       {[{:cursor_pos, x, y}], <<>>} = Events.parse_all(binary)
       assert_in_delta x, 320.0, 0.001
       assert_in_delta y, 480.0, 0.001
@@ -305,7 +305,7 @@ defmodule ScenicDriverRemote.ProtocolTest do
 
     test "parses mouse_button event" do
       binary =
-        <<0x86, 20::big-unsigned-32, 0::big-unsigned-32, 1::big-unsigned-32, 0::big-unsigned-32,
+        <<0x0D, 20::big-unsigned-32, 0::big-unsigned-32, 1::big-unsigned-32, 0::big-unsigned-32,
           100.0::big-float-32, 200.0::big-float-32>>
 
       {[{:mouse_button, button, action, mods, x, y}], <<>>} = Events.parse_all(binary)
@@ -318,7 +318,7 @@ defmodule ScenicDriverRemote.ProtocolTest do
 
     test "parses scroll event" do
       binary =
-        <<0x87, 16::big-unsigned-32, 0.0::big-float-32, -3.0::big-float-32, 500.0::big-float-32,
+        <<0x0E, 16::big-unsigned-32, 0.0::big-float-32, -3.0::big-float-32, 500.0::big-float-32,
           400.0::big-float-32>>
 
       {[{:scroll, xo, yo, x, y}], <<>>} = Events.parse_all(binary)
@@ -329,16 +329,16 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "parses cursor_enter event" do
-      binary = <<0x88, 1::big-unsigned-32, 1::8>>
+      binary = <<0x0F, 1::big-unsigned-32, 1::8>>
       {[{:cursor_enter, true}], <<>>} = Events.parse_all(binary)
 
-      binary2 = <<0x88, 1::big-unsigned-32, 0::8>>
+      binary2 = <<0x0F, 1::big-unsigned-32, 0::8>>
       {[{:cursor_enter, false}], <<>>} = Events.parse_all(binary2)
     end
 
     test "parses stats event" do
       bytes = 1_234_567_890
-      binary = <<0x90, 8::big-unsigned-32, bytes::big-unsigned-64>>
+      binary = <<0x01, 8::big-unsigned-32, bytes::big-unsigned-64>>
       {[{:stats, val}], <<>>} = Events.parse_all(binary)
       assert val == bytes
     end
@@ -358,8 +358,8 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "parses multiple events" do
-      ready = <<0x80, 0::big-unsigned-32>>
-      reshape = <<0x81, 8::big-unsigned-32, 800::big-unsigned-32, 600::big-unsigned-32>>
+      ready = <<0x06, 0::big-unsigned-32>>
+      reshape = <<0x05, 8::big-unsigned-32, 800::big-unsigned-32, 600::big-unsigned-32>>
       binary = ready <> reshape
 
       {events, remaining} = Events.parse_all(binary)
@@ -368,13 +368,13 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "handles incomplete header" do
-      {events, remaining} = Events.parse_all(<<0x80, 0>>)
+      {events, remaining} = Events.parse_all(<<0x06, 0>>)
       assert events == []
-      assert remaining == <<0x80, 0>>
+      assert remaining == <<0x06, 0>>
     end
 
     test "handles incomplete payload" do
-      binary = <<0x81, 8::big-unsigned-32, 800::big-unsigned-32>>
+      binary = <<0x05, 8::big-unsigned-32, 800::big-unsigned-32>>
       {events, remaining} = Events.parse_all(binary)
       assert events == []
       assert remaining == binary
@@ -387,8 +387,8 @@ defmodule ScenicDriverRemote.ProtocolTest do
     end
 
     test "parses complete events and returns trailing incomplete" do
-      ready = <<0x80, 0::big-unsigned-32>>
-      partial = <<0x81, 8::big-unsigned-32, 800::big-unsigned-32>>
+      ready = <<0x06, 0::big-unsigned-32>>
+      partial = <<0x05, 8::big-unsigned-32, 800::big-unsigned-32>>
       binary = ready <> partial
 
       {events, remaining} = Events.parse_all(binary)

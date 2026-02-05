@@ -9,16 +9,14 @@ or WebSocket to a remote renderer (Android, iOS, browser, desktop).
 ```
 +------------------+       binary protocol        +------------------+
 |  BEAM / Scenic   | --------------------------> |  Remote Renderer  |
-|  ViewPort        | <--- events (touch, keys) -- |  (Android / iOS)  |
-|  + this driver   |       TCP / WS / Unix        |  Canvas / Metal   |
+|  ViewPort        | <--- events (touch, keys) --|  (Android / iOS)  |
+|  + this driver   |       TCP / WS / Unix       |  Canvas / Metal   |
 +------------------+                              +------------------+
 ```
 
-The driver sits inside the Scenic ViewPort as a `Scenic.Driver`. It converts
-Scenic script operations (put_script, del_script, reset, render) into framed
-binary messages and pushes them to the renderer. The renderer sends back
-input events (touch, reshape, keyboard) which the driver translates into
-Scenic input events.
+This driver implements the BEAM/Elixir side of the [Scenic Remote Protocol](../SCENIC_REMOTE_PROTOCOL.md). It converts Scenic script operations (put_script, del_script, reset, render) into framed binary messages and pushes them to the renderer. The renderer sends back input events (touch, reshape, keyboard) which the driver translates into Scenic input events.
+
+**Related**: [scenic_renderer_native](https://github.com/borodark/scenic_renderer_native) - C library implementing the renderer side
 
 ### Multi-client support (TcpServer)
 
@@ -117,7 +115,11 @@ drivers: [
 | `url` | string | | WebSocket URL |
 | `reconnect_interval` | integer | 1000 | ms between reconnection attempts |
 
-## Binary protocol
+## Binary Protocol
+
+See [SCENIC_REMOTE_PROTOCOL.md](SCENIC_REMOTE_PROTOCOL.md) for the complete protocol specification.
+
+### Quick Reference
 
 All messages share one frame format:
 
@@ -132,30 +134,35 @@ All messages share one frame format:
 
 | Code | Name | Payload |
 |------|------|---------|
-| 0x01 | CLEAR_COLOR | r:f32 g:f32 b:f32 a:f32 |
-| 0x02 | PUT_SCRIPT | id_len:u32 id:bytes script:bytes |
-| 0x03 | DEL_SCRIPT | id_len:u32 id:bytes |
-| 0x04 | RESET | *(empty)* |
-| 0x05 | PUT_FONT | name_len:u32 data_len:u32 name:bytes data:bytes |
-| 0x06 | PUT_IMAGE | id_len:u32 data_len:u32 w:u32 h:u32 fmt:u32 id:bytes data:bytes |
-| 0x07 | GLOBAL_TX | a:f32 b:f32 c:f32 d:f32 e:f32 f:f32 |
-| 0x0F | RENDER | *(empty)* |
+| 0x01 | PUT_SCRIPT | id_len:u32 id:bytes script:bytes |
+| 0x02 | DEL_SCRIPT | id_len:u32 id:bytes |
+| 0x03 | RESET | *(empty)* |
+| 0x04 | GLOBAL_TX | a:f32 b:f32 c:f32 d:f32 e:f32 f:f32 |
+| 0x05 | CURSOR_TX | a:f32 b:f32 c:f32 d:f32 e:f32 f:f32 |
+| 0x06 | RENDER | *(empty)* |
+| 0x08 | CLEAR_COLOR | r:f32 g:f32 b:f32 a:f32 |
+| 0x0A | REQUEST_INPUT | flags:u32 |
 | 0x20 | QUIT | *(empty)* |
+| 0x40 | PUT_FONT | name_len:u32 data_len:u32 name:bytes data:bytes |
+| 0x41 | PUT_IMAGE | id_len:u32 data_len:u32 w:u32 h:u32 fmt:u32 id:bytes data:bytes |
 
 ### Events (renderer -> driver)
 
 | Code | Name | Payload |
 |------|------|---------|
-| 0x80 | READY | *(empty)* |
-| 0x81 | RESHAPE | width:u32 height:u32 |
-| 0x82 | TOUCH | action:u8 x:f32 y:f32 |
-| 0x83 | KEY | key:u32 scancode:u32 action:i32 mods:u32 |
-| 0x84 | CODEPOINT | codepoint:u32 mods:u32 |
-| 0x85 | CURSOR_POS | x:f32 y:f32 |
-| 0x86 | MOUSE_BUTTON | button:u32 action:u32 mods:u32 x:f32 y:f32 |
-| 0x87 | SCROLL | x_off:f32 y_off:f32 x:f32 y:f32 |
-| 0x88 | CURSOR_ENTER | entered:u8 |
-| 0x90 | STATS | bytes_received:u64 |
+| 0x01 | STATS | bytes_received:u64 |
+| 0x05 | RESHAPE | width:u32 height:u32 |
+| 0x06 | READY | *(empty)* |
+| 0x08 | TOUCH | action:u8 x:f32 y:f32 |
+| 0x0A | KEY | key:u32 scancode:u32 action:i32 mods:u32 |
+| 0x0B | CODEPOINT | codepoint:u32 mods:u32 |
+| 0x0C | CURSOR_POS | x:f32 y:f32 |
+| 0x0D | MOUSE_BUTTON | button:u32 action:u32 mods:u32 x:f32 y:f32 |
+| 0x0E | SCROLL | x_off:f32 y_off:f32 x:f32 y:f32 |
+| 0x0F | CURSOR_ENTER | entered:u8 |
+| 0xA0 | LOG_INFO | message:bytes |
+| 0xA1 | LOG_WARN | message:bytes |
+| 0xA2 | LOG_ERROR | message:bytes |
 
 Numeric encoding: **u32** = unsigned 32-bit big-endian, **i32** = signed,
 **f32** = IEEE 754 float big-endian, **u8** = single byte, **u64** = unsigned 64-bit BE.
@@ -220,6 +227,12 @@ mix test
 
 57 tests covering protocol encoding/decoding, event parsing, TcpServer
 multi-client connections, frame buffering, and broadcast.
+
+## Related Projects
+
+- [scenic_renderer_native](https://github.com/borodark/scenic_renderer_native) - C renderer implementation
+- [scenic_driver_local](https://github.com/ScenicFramework/scenic_driver_local) - Canonical protocol source
+- [Scenic](https://github.com/ScenicFramework/scenic) - Elixir UI framework
 
 ## License
 

@@ -258,35 +258,17 @@ defmodule ScenicDriverRemote do
   end
 
   # Client reports its actual screen size in device pixels.
-  #
-  # Two things happen:
-  #   1. Forward to scene — scene may re-layout its graph for the new dimensions.
-  #   2. Compute GLOBAL_TX — uniform scale + centering that maps from the
-  #      configured viewport size (e.g. 1080×2400) to the reported device size.
-  #
-  # NOTE: if the scene re-layouts using {width, height} directly, the scene
-  # coordinates are already in device-pixel space and the GLOBAL_TX scaling
-  # is redundant (see @moduledoc "double-scaling caveat").
+  # Compute GLOBAL_TX that stretches the design canvas to fill the device screen.
   defp handle_event({:reshape, width, height}, driver) do
-    Scenic.ViewPort.input(driver.viewport, {:viewport, {:reshape, {width, height}}})
-
-    # Scale from viewport config space → device pixel space (letterbox fit)
     {vp_w, vp_h} = driver.viewport.size
     sx = width / vp_w
     sy = height / vp_h
-    scale = min(sx, sy)
-
-    # Center content when aspect ratios differ
-    rendered_w = vp_w * scale
-    rendered_h = vp_h * scale
-    tx = (width - rendered_w) / 2.0
-    ty = (height - rendered_h) / 2.0
 
     Logger.info(
-      "#{__MODULE__}: reshape #{width}x#{height} vp=#{vp_w}x#{vp_h} scale=#{scale} offset=#{tx},#{ty}"
+      "#{__MODULE__}: reshape #{width}x#{height} vp=#{vp_w}x#{vp_h} scale=#{sx},#{sy}"
     )
 
-    send_command(driver, Commands.global_tx(scale, 0.0, 0.0, scale, tx, ty))
+    send_command(driver, Commands.global_tx(sx, 0.0, 0.0, sy, 0.0, 0.0))
     send_command(driver, Commands.render())
   end
 
